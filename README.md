@@ -1,28 +1,26 @@
 # tbank-installment-go-client
 
-Go client for the T-Bank Forma installment API methods documented in this repository.
+Go-клиент для API рассрочки T-Bank Forma, методы которого описаны в этом репозитории.
 
-## Scope
+## Что реализовано
 
-This package implements the methods and payloads described in [doc.md](./doc.md):
+Пакет реализует методы и структуры данных, описанные в [doc.md](./doc.md):
 
 - `Create`
 - `Commit`
 - `Cancel`
 - `Info`
-- webhook payload parsing helpers
+- вспомогательные функции для разбора webhook payload
 
-The public API intentionally mirrors the documentation structure, including separate response types for different methods where the docs describe them separately.
+Публичный API намеренно повторяет структуру документации, включая отдельные типы ответов для разных методов там, где это разделено в исходном описании.
 
-## Installation
+## Установка
 
 ```bash
-go get <your-module-path>
+go get github.com/alewon/tbank-installment-go-client
 ```
 
-Before publishing, replace `<your-module-path>` with the final public module path in `go.mod`.
-
-## Usage
+## Использование
 
 ```go
 package main
@@ -31,7 +29,7 @@ import (
 	"context"
 	"log"
 
-	tbankinstallment "tbank-installment-go-client"
+	tbankinstallment "github.com/alewon/tbank-installment-go-client"
 )
 
 func main() {
@@ -65,49 +63,40 @@ func main() {
 }
 ```
 
-## Webhooks
+## Webhook
 
-Webhook payloads can be decoded with `ParseWebhook`. Source IP checks are optional and configured via `Config.WebhookTrustedSubnet`.
+Webhook payload можно декодировать через `ParseWebhook`. Проверка IP-адреса источника опциональна и настраивается через `Config.WebhookTrustedSubnet`.
 
 ```go
 payload, err := tbankinstallment.ParseWebhook(r.Body)
 if err != nil {
-	// handle bad payload
+	// обработать некорректный payload
 }
 
 if !client.IsTrustedWebhookRequest(r) {
-	// handle untrusted source
+	// обработать недоверенный источник
 }
 
 _ = payload
 ```
 
-## Development
+## Разработка
 
-Run tests:
+Для запуска тестов:
 
 ```bash
 go test ./...
 ```
 
-Or use the local helper targets:
+## Совместимость
 
-```bash
-make fmt
-make vet
-make test
-make check
-```
-
-## Compatibility
-
-- Go `1.26`
-- No external runtime dependencies
+- Go `1.18+`
+- внешние runtime-зависимости отсутствуют
 
 ## CI
 
-GitHub Actions runs formatting checks, `go vet`, and `go test ./...` for pushes and pull requests.
+GitHub Actions запускает проверки форматирования, `go vet` и `go test ./...` для `push` и `pull request`.
 
-## License
+## Лицензия
 
-This project is licensed under the MIT License. See [LICENSE](./LICENSE).
+Проект распространяется по лицензии MIT. Подробности см. в [LICENSE](./LICENSE).
