@@ -24,6 +24,7 @@ type HTTPDoer interface {
 type Config struct {
 	Username             string
 	Password             string
+	Demo                 bool
 	BaseURL              string
 	HTTPClient           HTTPDoer
 	UserAgent            string
@@ -34,19 +35,13 @@ type Client struct {
 	baseURL              *url.URL
 	username             string
 	password             string
+	demo                 bool
 	httpClient           HTTPDoer
 	userAgent            string
 	webhookTrustedSubnet *net.IPNet
 }
 
 func NewClient(cfg Config) (*Client, error) {
-	if strings.TrimSpace(cfg.Username) == "" {
-		return nil, fmt.Errorf("username is required")
-	}
-	if strings.TrimSpace(cfg.Password) == "" {
-		return nil, fmt.Errorf("password is required")
-	}
-
 	rawBaseURL := cfg.BaseURL
 	if rawBaseURL == "" {
 		rawBaseURL = defaultBaseURL
@@ -78,6 +73,7 @@ func NewClient(cfg Config) (*Client, error) {
 		baseURL:              baseURL,
 		username:             cfg.Username,
 		password:             cfg.Password,
+		demo:                 cfg.Demo,
 		httpClient:           httpClient,
 		userAgent:            cfg.UserAgent,
 		webhookTrustedSubnet: webhookTrustedSubnet,
@@ -90,7 +86,22 @@ func (c *Client) Create(ctx context.Context, req CreateRequest) (*CreateResponse
 	}
 
 	var resp CreateResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/api/partners/v2/orders/create", req, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/api/partners/v2/orders/create", req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) CreateDemo(ctx context.Context, req CreateDemoRequest) (*CreateResponse, error) {
+	if strings.TrimSpace(req.PromoCode) == "" {
+		req.PromoCode = defaultPromoCode
+	}
+	if strings.TrimSpace(string(req.DemoFlow)) == "" {
+		return nil, fmt.Errorf("demoFlow is required")
+	}
+
+	var resp CreateResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/api/partners/v2/orders/create-demo", req, &resp, false); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -100,9 +111,12 @@ func (c *Client) Commit(ctx context.Context, orderNumber string) (*CommitRespons
 	if strings.TrimSpace(orderNumber) == "" {
 		return nil, fmt.Errorf("orderNumber is required")
 	}
+	if err := c.requireAuth(); err != nil {
+		return nil, err
+	}
 
 	var resp CommitResponse
-	if err := c.doJSON(ctx, http.MethodPost, orderActionPath(orderNumber, "commit"), nil, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, orderActionPath(orderNumber, "commit"), nil, &resp, true); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -112,9 +126,12 @@ func (c *Client) Cancel(ctx context.Context, orderNumber string) (*CancelRespons
 	if strings.TrimSpace(orderNumber) == "" {
 		return nil, fmt.Errorf("orderNumber is required")
 	}
+	if err := c.requireAuth(); err != nil {
+		return nil, err
+	}
 
 	var resp CancelResponse
-	if err := c.doJSON(ctx, http.MethodPost, orderActionPath(orderNumber, "cancel"), nil, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, orderActionPath(orderNumber, "cancel"), nil, &resp, true); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -124,9 +141,12 @@ func (c *Client) Info(ctx context.Context, orderNumber string) (*InfoResponse, e
 	if strings.TrimSpace(orderNumber) == "" {
 		return nil, fmt.Errorf("orderNumber is required")
 	}
+	if err := c.requireAuth(); err != nil {
+		return nil, err
+	}
 
 	var resp InfoResponse
-	if err := c.doJSON(ctx, http.MethodGet, orderActionPath(orderNumber, "info"), nil, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, orderActionPath(orderNumber, "info"), nil, &resp, true); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -136,8 +156,8 @@ func orderActionPath(orderNumber, action string) string {
 	return "/api/partners/v2/orders/" + url.PathEscape(strings.TrimSpace(orderNumber)) + "/" + action
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, body any, dst any) error {
-	req, err := c.newRequest(ctx, method, path, body)
+func (c *Client) doJSON(ctx context.Context, method, path string, body any, dst any, useAuth bool) error {
+	req, err := c.newRequest(ctx, method, path, body, useAuth)
 	if err != nil {
 		return err
 	}
@@ -166,7 +186,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, dst 
 	return nil
 }
 
-func (c *Client) newRequest(ctx context.Context, method, path string, body any) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, method, path string, body any, useAuth bool) (*http.Request, error) {
 	rel, err := url.Parse(path)
 	if err != nil {
 		return nil, fmt.Errorf("parse request path: %w", err)
@@ -188,7 +208,9 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body any) 
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	req.SetBasicAuth(c.username, c.password)
+	if useAuth {
+		req.SetBasicAuth(c.authUsername(), c.password)
+	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -198,6 +220,23 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body any) 
 	}
 
 	return req, nil
+}
+
+func (c *Client) requireAuth() error {
+	if strings.TrimSpace(c.username) == "" {
+		return fmt.Errorf("username is required")
+	}
+	if strings.TrimSpace(c.password) == "" {
+		return fmt.Errorf("password is required")
+	}
+	return nil
+}
+
+func (c *Client) authUsername() string {
+	if c.demo && !strings.HasPrefix(c.username, "demo-") {
+		return "demo-" + c.username
+	}
+	return c.username
 }
 
 type APIError struct {

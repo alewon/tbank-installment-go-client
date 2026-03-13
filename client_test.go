@@ -17,7 +17,7 @@ func (f roundTripFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestCreateUsesBasicAuthAndPayload(t *testing.T) {
+func TestCreateDoesNotUseBasicAuthAndBuildsPayload(t *testing.T) {
 	client, err := NewClient(Config{
 		Username: "user",
 		Password: "pass",
@@ -30,9 +30,8 @@ func TestCreateUsesBasicAuthAndPayload(t *testing.T) {
 				t.Fatalf("unexpected path: %s", req.URL.Path)
 			}
 
-			wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("user:pass"))
-			if got := req.Header.Get("Authorization"); got != wantAuth {
-				t.Fatalf("unexpected auth header: %s", got)
+			if got := req.Header.Get("Authorization"); got != "" {
+				t.Fatalf("create request must not include auth header: %s", got)
 			}
 
 			body, err := io.ReadAll(req.Body)
@@ -70,6 +69,69 @@ func TestCreateUsesBasicAuthAndPayload(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
+	}
+	if resp.ID != "1" {
+		t.Fatalf("unexpected response id: %s", resp.ID)
+	}
+}
+
+func TestCreateDemoUsesCreateDemoEndpoint(t *testing.T) {
+	client, err := NewClient(Config{
+		Username: "user",
+		Password: "pass",
+		BaseURL:  "https://example.com",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", req.Method)
+			}
+			if req.URL.Path != "/api/partners/v2/orders/create-demo" {
+				t.Fatalf("unexpected path: %s", req.URL.Path)
+			}
+			if got := req.Header.Get("Authorization"); got != "" {
+				t.Fatalf("create demo request must not include auth header: %s", got)
+			}
+
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			raw := string(body)
+			for _, fragment := range []string{
+				`"promoCode":"default"`,
+				`"demoFlow":"sms"`,
+			} {
+				if !strings.Contains(raw, fragment) {
+					t.Fatalf("request body does not contain %s: %s", fragment, raw)
+				}
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(`{"id":"1","link":"https://forma.example/app/1"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	resp, err := client.CreateDemo(context.Background(), CreateDemoRequest{
+		CreateRequestBody: CreateRequestBody{
+			ShopID:     "shop",
+			ShowcaseID: "showcase",
+			Sum:        1000,
+			Items: []CreateItem{{
+				Name:     "item",
+				Quantity: 1,
+				Price:    1000,
+			}},
+		},
+		DemoFlow: DemoFlowSMS,
+	})
+	if err != nil {
+		t.Fatalf("CreateDemo() error = %v", err)
 	}
 	if resp.ID != "1" {
 		t.Fatalf("unexpected response id: %s", resp.ID)
@@ -144,6 +206,55 @@ func TestCreateEncodesPrefilledCustomerValues(t *testing.T) {
 	}
 }
 
+func TestCreateOmitsEmptyReturnURLs(t *testing.T) {
+	client, err := NewClient(Config{
+		Username: "user",
+		Password: "pass",
+		BaseURL:  "https://example.com",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+
+			raw := string(body)
+			for _, fragment := range []string{
+				`"successURL"`,
+				`"failURL"`,
+				`"returnURL"`,
+			} {
+				if strings.Contains(raw, fragment) {
+					t.Fatalf("request body must not contain %s: %s", fragment, raw)
+				}
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(`{"id":"1","link":"https://forma.example/app/1"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	_, err = client.Create(context.Background(), CreateRequest{
+		ShopID:     "shop",
+		ShowcaseID: "showcase",
+		Sum:        1000,
+		Items: []CreateItem{{
+			Name:     "item",
+			Quantity: 1,
+			Price:    1000,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+}
+
 func TestCommitUsesPOSTAndDecodesCommitResponse(t *testing.T) {
 	client, err := NewClient(Config{
 		Username: "user",
@@ -155,6 +266,10 @@ func TestCommitUsesPOSTAndDecodesCommitResponse(t *testing.T) {
 			}
 			if req.URL.Path != "/api/partners/v2/orders/order-42/commit" {
 				t.Fatalf("unexpected path: %s", req.URL.Path)
+			}
+			wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("user:pass"))
+			if got := req.Header.Get("Authorization"); got != wantAuth {
+				t.Fatalf("unexpected auth header: %s", got)
 			}
 
 			return &http.Response{
@@ -188,6 +303,48 @@ func TestCommitUsesPOSTAndDecodesCommitResponse(t *testing.T) {
 	}
 	if resp.CommitCooldown == nil {
 		t.Fatal("expected commit cooldown to be decoded")
+	}
+}
+
+func TestInfoUsesDemoPrefixedBasicAuthInDemoMode(t *testing.T) {
+	client, err := NewClient(Config{
+		Username: "showcase",
+		Password: "pass",
+		Demo:     true,
+		BaseURL:  "https://example.com",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("demo-showcase:pass"))
+			if got := req.Header.Get("Authorization"); got != wantAuth {
+				t.Fatalf("unexpected auth header: %s", got)
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body: io.NopCloser(strings.NewReader(`{
+					"id":"order-42",
+					"status":"signed",
+					"created_at":"2022-11-10T09:03:48.780Z",
+					"demo":true,
+					"committed":false,
+					"order_amount":3200,
+					"appropriate_signing_types":["sms"],
+					"expected_overdue_at":"2022-11-24T09:04:55.526449Z"
+				}`)),
+				Header: make(http.Header),
+			}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	resp, err := client.Info(context.Background(), "order-42")
+	if err != nil {
+		t.Fatalf("Info() error = %v", err)
+	}
+	if resp.ID != "order-42" || !resp.Demo {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
 

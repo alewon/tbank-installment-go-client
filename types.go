@@ -82,11 +82,27 @@ type CreateResponse struct {
 	Link string `json:"link"`
 }
 
+type DemoFlow string
+
+const (
+	DemoFlowSMS  DemoFlow = "sms"
+	DemoFlowBank DemoFlow = "bank"
+	DemoFlowSES  DemoFlow = "ses"
+)
+
+type DemoInitialStage string
+
 type CreateRequestBodyExampleOnlyFields struct {
 	DemoFlow string `json:"demoFlow,omitempty"`
 }
 
 type CreateRequest = CreateRequestBody
+
+type CreateDemoRequest struct {
+	CreateRequestBody
+	DemoFlow     DemoFlow         `json:"demoFlow"`
+	InitialStage DemoInitialStage `json:"initialStage,omitempty"`
+}
 
 type CreateItem = CreateRequestBodyItem
 
