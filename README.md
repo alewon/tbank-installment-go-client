@@ -1,24 +1,12 @@
 # Go-клиент для сервиса «T-Рассрочка»
 
-## Что реализовано
-
-Пакет реализует методы и структуры данных, описанные в [doc.md](./doc.md):
-
-- `Create`
-- `Commit`
-- `Cancel`
-- `Info`
-- вспомогательные функции для разбора webhook payload
-
-Публичный API намеренно повторяет структуру документации, включая отдельные типы ответов для разных методов там, где это разделено в исходном описании.
-
 ## Установка
 
 ```bash
 go get github.com/alewon/tbank-installment-go-client
 ```
 
-## Использование
+## Быстрый старт
 
 ```go
 package main
@@ -32,26 +20,31 @@ import (
 
 func main() {
 	client, err := tbankinstallment.NewClient(tbankinstallment.Config{
-		Username:             "partner-login",
-		Password:             "partner-password",
-		WebhookTrustedSubnet: "91.194.226.0/23",
+		Username: "showcase-id",
+		Password: "password",
+		Demo:     true,
+		BaseURL:  "https://forma.tbank.ru",
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	resp, err := client.Create(context.Background(), tbankinstallment.CreateRequest{
-		ShopID:     "SHOP_ID",
-		ShowcaseID: "SHOWCASE_ID",
-		Sum:        100000,
-		Items: []tbankinstallment.CreateItem{
-			{
-				Name:     "iPhone",
-				Quantity: 1,
-				Price:    100000,
+	resp, err := client.CreateDemo(context.Background(), tbankinstallment.CreateDemoRequest{
+		CreateRequestBody: tbankinstallment.CreateRequestBody{
+			ShopID:      "SHOP_ID",
+			ShowcaseID:  "SHOWCASE_ID",
+			Sum:         3200,
+			OrderNumber: "order-123",
+			PromoCode:   "installment_0_0_3_5,41",
+			Items: []tbankinstallment.CreateItem{
+				{
+					Name:     "Товар",
+					Quantity: 1,
+					Price:    3200,
+				},
 			},
 		},
-		OrderNumber: "1234567890",
+		DemoFlow: tbankinstallment.DemoFlowSMS,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -61,40 +54,13 @@ func main() {
 }
 ```
 
-## Webhook
-
-Webhook payload можно декодировать через `ParseWebhook`. Проверка IP-адреса источника опциональна и настраивается через `Config.WebhookTrustedSubnet`.
+Для получения информации по тестовой заявке:
 
 ```go
-payload, err := tbankinstallment.ParseWebhook(r.Body)
+info, err := client.Info(context.Background(), "order-123")
 if err != nil {
-	// обработать некорректный payload
+	log.Fatal(err)
 }
 
-if !client.IsTrustedWebhookRequest(r) {
-	// обработать недоверенный источник
-}
-
-_ = payload
+log.Println(info.Status, info.Committed)
 ```
-
-## Разработка
-
-Для запуска тестов:
-
-```bash
-go test ./...
-```
-
-## Совместимость
-
-- Go `1.18+`
-- внешние runtime-зависимости отсутствуют
-
-## CI
-
-GitHub Actions запускает проверки форматирования, `go vet` и `go test ./...` для `push` и `pull request`.
-
-## Лицензия
-
-Проект распространяется по лицензии MIT. Подробности см. в [LICENSE](./LICENSE).
